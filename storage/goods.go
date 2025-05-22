@@ -10,16 +10,24 @@ import (
 )
 
 type Goods struct {
-	ID         uint64    `json:"id"`
-	LesseeID   uint64    `json:"lessee_id"`
-	Name       string    `json:"name"`
-	FinalPrice float64   `json:"final_price"`
-	Price      float64   `json:"price"`
-	Tags       []string  `json:"tags"`
-	Avatar     string    `json:"avatar"`
-	CreateTime time.Time `json:"create_time"`
-	UpdateTime time.Time `json:"update_time"`
+	ID         uint64      `json:"id"`
+	LesseeID   uint64      `json:"lessee_id"`
+	Status     GoodsStatus `json:"status"`
+	Name       string      `json:"name"`
+	FinalPrice float64     `json:"final_price"`
+	Price      float64     `json:"price"`
+	Tags       []string    `json:"tags"`
+	Avatar     string      `json:"avatar"`
+	Sold       uint64      `json:"sold"`
+	CreateTime time.Time   `json:"create_time"`
+	UpdateTime time.Time   `json:"update_time"`
 }
+type GoodsStatus string
+
+const (
+	Active   GoodsStatus = "active"
+	InActive GoodsStatus = "inactive"
+)
 
 type GoodsSlice []Goods
 
@@ -107,6 +115,36 @@ func (g *Goods) Update(lid, id uint64) error {
 		if len(g.Tags) > 0 {
 			old.Tags = g.Tags
 		}
+		if g.Status != old.Status {
+			old.Status = g.Status
+		}
+		old.UpdateTime = time.Now()
+
+		data, err = json.Marshal(old)
+		if err != nil {
+			return err
+		}
+		return txn.Set(item.KeyCopy(nil), data)
+	})
+}
+
+func (g Goods) UpdateSold(lid, id uint64, inc uint64) error {
+	return GetDB().Update(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(g.GetKey(lid, id)))
+		if err != nil {
+			return err
+		}
+		var old Goods
+		data, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		err = json.Unmarshal(data, &old)
+		if err != nil {
+			return err
+		}
+
+		old.Sold += inc
 		old.UpdateTime = time.Now()
 
 		data, err = json.Marshal(old)

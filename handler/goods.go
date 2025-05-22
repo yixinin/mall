@@ -1,10 +1,8 @@
 package handler
 
 import (
-	"fmt"
-	"io"
 	"mall/storage"
-	"mime/multipart"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,55 +13,35 @@ import (
 
 func (h *Handler) PostGoods(c *gin.Context) {
 	var req struct {
-		LesseeID   uint64                `form:"lessee_id"`
-		Name       string                `form:"name"`
-		Price      float64               `form:"price"`
-		FinalPrice float64               `form:"final_price"`
-		Tags       string                `form:"tags"`
-		Avatar     *multipart.FileHeader `form:"avatar"`
+		ID         uint64              `json:"id"`
+		LesseeID   uint64              `json:"lessee_id"`
+		Status     storage.GoodsStatus `json:"status"`
+		Name       string              `json:"name"`
+		Price      float64             `json:"price"`
+		FinalPrice float64             `json:"final_price"`
+		Tags       []string            `json:"tags"`
+		Avatar     string              `json:"avatar"`
 	}
 	err := c.Bind(&req)
 	if err != nil {
 		RespBindError(c, err)
 		return
 	}
-	if req.Avatar == nil {
+	if req.Avatar == "" {
 		RespMessage(c, "商品图片为空")
 		return
 	}
-	fs, err := req.Avatar.Open()
-	if err != nil {
-		RespBindError(c, err)
-		return
-	}
-	defer fs.Close()
 
-	img, err := io.ReadAll(fs)
-	if err != nil {
-		RespBindError(c, err)
-		return
-	}
-	id, err := storage.GenID()
-	if err != nil {
-		RespInternalError(c, err)
-		return
-	}
-
-	imageKey := storage.GetGoodsAvatarImageKey(id)
-	err = storage.SaveImage(imageKey, img)
-	if err != nil {
-		RespInternalError(c, err)
-		return
-	}
 	var now = time.Now()
 	goods := storage.Goods{
-		ID:         id,
+		ID:         req.ID,
 		LesseeID:   req.LesseeID,
 		Name:       req.Name,
 		Price:      req.Price,
 		FinalPrice: req.FinalPrice,
-		Tags:       GetTags(req.Tags),
-		Avatar:     fmt.Sprintf("/%s", imageKey),
+		Status:     req.Status,
+		Tags:       req.Tags,
+		Avatar:     req.Avatar,
 		CreateTime: now,
 		UpdateTime: now,
 	}
@@ -84,13 +62,87 @@ func (h *Handler) PostGoods(c *gin.Context) {
 }
 
 func (h *Handler) GetGoodsList(c *gin.Context) {
+	var req struct {
+		Status storage.GoodsStatus `form:"status"`
+	}
+	err := c.Bind(&req)
+	if err != nil {
+		RespBindError(c, err)
+		return
+	}
+	if req.Status != storage.Active {
+		uid := c.GetUint64("uid")
+		user, err := storage.Model[storage.User]().GetByID(uid)
+		if err != nil {
+			RespInternalError(c, err)
+			return
+		}
+		if user.Kind != storage.Manger && user.Kind != storage.Admin {
+			RespForbidden(c)
+			return
+		}
+	}
 	goods, err := storage.Model[storage.Goods]().GetGoods(c.GetUint64("lid"))
 	if err != nil {
 		RespInternalError(c, err)
 		return
 	}
-	sort.Sort(sort.Reverse(goods))
-	Response(c, goods)
+	var respGoods = make(storage.GoodsSlice, 0, len(goods))
+	for i := range goods {
+		if goods[i].Status == req.Status || req.Status == "" {
+			respGoods = append(respGoods, goods[i])
+		}
+	}
+	sort.Sort(sort.Reverse(respGoods))
+	Response(c, respGoods)
+}
+
+type PreInfo struct {
+	ID         uint64    `json:"id"`
+	UpdateTime time.Time `json:"up"`
+}
+
+func (h *Handler) PreGetGoodsList(c *gin.Context) {
+	var req struct {
+		Status storage.GoodsStatus `form:"status"`
+	}
+	err := c.Bind(&req)
+	if err != nil {
+		RespBindError(c, err)
+		return
+	}
+	if req.Status != storage.Active {
+		uid := c.GetUint64("uid")
+		user, err := storage.Model[storage.User]().GetByID(uid)
+		if err != nil {
+			RespInternalError(c, err)
+			return
+		}
+		if user.Kind != storage.Manger && user.Kind != storage.Admin {
+			RespForbidden(c)
+			return
+		}
+	}
+	goods, err := storage.Model[storage.Goods]().GetGoods(c.GetUint64("lid"))
+	if err != nil {
+		RespInternalError(c, err)
+		return
+	}
+	var respGoods = make(storage.GoodsSlice, 0, len(goods))
+	for i := range goods {
+		if goods[i].Status == req.Status || req.Status == "" {
+			respGoods = append(respGoods, goods[i])
+		}
+	}
+	sort.Sort(sort.Reverse(respGoods))
+	var infos = make([]PreInfo, 0, len(respGoods))
+	for _, v := range respGoods {
+		infos = append(infos, PreInfo{
+			ID:         v.ID,
+			UpdateTime: v.UpdateTime,
+		})
+	}
+	Response(c, infos)
 }
 func (h *Handler) GetGoods(c *gin.Context) {
 	var req struct {
@@ -110,18 +162,23 @@ func (h *Handler) GetGoods(c *gin.Context) {
 		RespInternalError(c, err)
 		return
 	}
+
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusNoContent)
+		c.Writer.Header().Set("x-up", storage.MarshalTime(goods.UpdateTime))
+		return
+	}
 	Response(c, goods)
 }
 
 func (h *Handler) PutGoods(c *gin.Context) {
 	var req struct {
-		ID         uint64                `uri:"id"`
-		LesseeID   uint64                `form:"lessee_id"`
-		Name       string                `form:"name"`
-		Price      float64               `form:"price"`
-		FinalPrice float64               `form:"final_price"`
-		Tags       string                `form:"tags"`
-		Avatar     *multipart.FileHeader `form:"avatar"`
+		ID         uint64              `uri:"id"`
+		Status     storage.GoodsStatus `json:"status"`
+		Name       string              `json:"name"`
+		Price      float64             `json:"price"`
+		FinalPrice float64             `json:"final_price"`
+		Tags       []string            `json:"tags"`
 	}
 	err := c.Bind(&req)
 	if err != nil {
@@ -137,36 +194,15 @@ func (h *Handler) PutGoods(c *gin.Context) {
 		RespBindError(c, err)
 		return
 	}
-	if req.Avatar != nil {
-		fs, err := req.Avatar.Open()
-		if err != nil {
-			RespBindError(c, err)
-			return
-		}
-		defer fs.Close()
-
-		img, err := io.ReadAll(fs)
-		if err != nil {
-			RespBindError(c, err)
-			return
-		}
-
-		imageKey := storage.GetGoodsAvatarImageKey(req.ID)
-		err = storage.SaveImage(imageKey, img)
-		if err != nil {
-			RespInternalError(c, err)
-			return
-		}
-	}
 
 	var now = time.Now()
 	goods := storage.Goods{
 		ID:         req.ID,
-		LesseeID:   req.LesseeID,
 		Name:       req.Name,
+		Status:     req.Status,
 		Price:      req.Price,
 		FinalPrice: req.FinalPrice,
-		Tags:       GetTags(req.Tags),
+		Tags:       req.Tags,
 		UpdateTime: now,
 	}
 	if goods.LesseeID == 0 {

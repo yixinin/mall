@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -82,6 +83,22 @@ func (u User) GetUsers() ([]User, error) {
 	}
 	return users, nil
 }
+func (u User) GetUsersByIDs(ids []uint64) ([]User, error) {
+	var users = make([]User, 0, len(ids))
+	for _, id := range ids {
+		key := u.GetKey(id)
+		var u User
+		err := Get(key, &u)
+		if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, err
+		}
+		if err != nil {
+			continue
+		}
+		users = append(users, u)
+	}
+	return users, nil
+}
 
 func (u *User) Update(id uint64) error {
 	return GetDB().Update(func(txn *badger.Txn) error {
@@ -105,7 +122,9 @@ func (u *User) Update(id uint64) error {
 			old.Avatar = u.Avatar
 		}
 		if u.Kind != "" && u.Kind != old.Kind {
-			old.Kind = u.Kind
+			if old.Kind != Admin {
+				old.Kind = u.Kind
+			}
 		}
 		old.UpdateTime = time.Now()
 

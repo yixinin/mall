@@ -27,6 +27,11 @@ func RespUnauthorized(c *gin.Context) {
 	c.Abort()
 }
 
+func RespForbidden(c *gin.Context) {
+	c.Status(http.StatusForbidden)
+	c.Abort()
+}
+
 func RespInternalError(c *gin.Context, err error) {
 	var ack Ack[any]
 	if errors.Is(err, badger.ErrKeyNotFound) {
@@ -40,7 +45,7 @@ func RespInternalError(c *gin.Context, err error) {
 			Code:    500,
 			Message: "interval error",
 		}
-		logrus.WithField("path", c.Request.URL.Path).Errorf("handle with interval error:%v", err)
+		logrus.WithField("path", c.Request.URL.Path).Errorf("handle with internal error:%v", err)
 	}
 
 	c.JSON(http.StatusOK, ack)

@@ -14,13 +14,16 @@ type OrderStatus string
 
 const (
 	Watting  OrderStatus = "watting"
-	Canceled OrderStatus = "canceled"
+	Comfirm  OrderStatus = "confirmed"
+	Canceled OrderStatus = "cancelled"
 	Done     OrderStatus = "done"
 )
 
 func (o OrderStatus) Value() int {
 	switch o {
 	case Watting:
+		return 4
+	case Comfirm:
 		return 3
 	case Canceled:
 		return 2
@@ -40,6 +43,7 @@ func (o OrderStatus) Less(v OrderStatus) bool {
 func (s OrderStatus) IsValid() bool {
 	switch s {
 	case Watting:
+	case Comfirm:
 	case Canceled:
 	case Done:
 	default:
@@ -55,7 +59,7 @@ type OrderGoods struct {
 	Count int     `json:"count"`
 }
 
-type OrderUser struct {
+type SimpleUser struct {
 	ID       uint64 `json:"id"`
 	Nickname string `json:"nickname"`
 }
@@ -64,6 +68,7 @@ type OrderReverse struct {
 	Time    string `json:"time"`
 	Address string `json:"address"`
 	Phone   string `json:"phone"`
+	Remark  string `json:"remark"`
 }
 
 type Order struct {
@@ -72,21 +77,11 @@ type Order struct {
 	Status     OrderStatus  `json:"status"`
 	Goods      []OrderGoods `json:"goods"`
 	TotalPrice float64      `json:"total_price"`
-	User       OrderUser    `json:"user"`
+	User       SimpleUser   `json:"user"`
+	Tech       SimpleUser   `json:"tech"`
 	Reverse    OrderReverse `json:"reverse"`
 	CreateTime time.Time    `json:"create_time"`
 	UpdateTime time.Time    `json:"update_time"`
-}
-
-func (o Order) MarshalJSON() ([]byte, error) {
-	type Alias Order
-	return json.Marshal(&struct {
-		CreateTime string `json:"create_time"`
-		*Alias
-	}{
-		CreateTime: o.CreateTime.Format("2006-01-02 15:04:05"),
-		Alias:      (*Alias)(&o),
-	})
 }
 
 type OrderSlice []Order
@@ -175,6 +170,14 @@ func (o *Order) Save() error {
 			return err
 		}
 
+		var g Goods
+		for _, goods := range o.Goods {
+			err := g.UpdateSold(o.LesseeID, goods.ID, uint64(goods.Count))
+			if err != nil {
+				return err
+			}
+		}
+
 		data, err = json.Marshal(o)
 		if err != nil {
 			return err
@@ -183,13 +186,13 @@ func (o *Order) Save() error {
 	})
 }
 
-func (o Order) Update(lid, id uint64, address string, reverseTime string, phone string, status OrderStatus) error {
-	return GetDB().Update(func(txn *badger.Txn) error {
+func (o Order) Update(lid, id uint64, address string, reverseTime string, phone string, status OrderStatus) (*Order, error) {
+	var old Order
+	err := GetDB().Update(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(o.GetKey(lid, id)))
 		if err != nil {
 			return err
 		}
-		var old Order
 		data, err := item.ValueCopy(nil)
 		if err != nil {
 			return err
@@ -221,13 +224,14 @@ func (o Order) Update(lid, id uint64, address string, reverseTime string, phone 
 		}
 		return txn.Set(item.KeyCopy(nil), data)
 	})
+	return &old, err
 }
 
 func (o Order) Delete(lid, id uint64) error {
 	return Delete(o.GetKey(lid, id))
 }
 
-func (o Order) GetByUid(lid, uid uint64) ([]Order, error) {
+func (o Order) GetByUid(lid, uid uint64, status OrderStatus) ([]Order, error) {
 	userOrdersKey := o.GetUserOrdersKey(uid)
 	var oids []uint64
 	err := Get(userOrdersKey, &oids)
@@ -246,7 +250,7 @@ func (o Order) GetByUid(lid, uid uint64) ([]Order, error) {
 		if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 			return nil, err
 		}
-		if order.ID != 0 {
+		if order.ID != 0 && (status == "" || order.Status == status) {
 			orders = append(orders, order)
 		}
 	}
@@ -259,7 +263,7 @@ func (o Order) GetByID(lid, id uint64) (Order, error) {
 	return order, err
 }
 
-func (o Order) GetByLesseeID(lid uint64) ([]Order, error) {
+func (o Order) GetByLesseeID(lid uint64, status OrderStatus) ([]Order, error) {
 	prefix := o.GetKey(lid, 0)
 	m, err := GetAllWithPrefix[Order](prefix)
 	if err != nil {
@@ -267,7 +271,9 @@ func (o Order) GetByLesseeID(lid uint64) ([]Order, error) {
 	}
 	var orders = make([]Order, 0, len(m))
 	for _, v := range m {
-		orders = append(orders, v)
+		if status == "" || v.Status == status {
+			orders = append(orders, v)
+		}
 	}
 	return orders, nil
 }

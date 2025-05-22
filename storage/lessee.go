@@ -20,6 +20,7 @@ const (
 type Lessee struct {
 	ID         uint64       `json:"id"`
 	Admins     []uint64     `json:"admins"`
+	Techs      []uint64     `json:"techs"`
 	Name       string       `json:"name"`
 	Status     LesseeStatus `json:"enable"`
 	CreateTime time.Time    `json:"create_time"`
@@ -56,7 +57,7 @@ func (l Lessee) GetByID(id uint64) (Lessee, error) {
 	return lessee, err
 }
 
-func (l Lessee) Update(id uint64, name string, status LesseeStatus, add []uint64, del []uint64) error {
+func (l Lessee) Update(id uint64, name string, status LesseeStatus) error {
 	return GetDB().Update(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(l.GetKey(id)))
 		if err != nil {
@@ -79,8 +80,61 @@ func (l Lessee) Update(id uint64, name string, status LesseeStatus, add []uint64
 		if name != "" {
 			old.Name = name
 		}
-		admins := set.From(old.Admins).Add(add...).Del(del...).ToSlice()
-		old.Admins = admins
+		old.UpdateTime = time.Now()
+
+		data, err = json.Marshal(old)
+		if err != nil {
+			return err
+		}
+		return txn.Set(item.KeyCopy(nil), data)
+	})
+}
+
+func (l Lessee) UpdateManger(id uint64, add, del []uint64) error {
+	return GetDB().Update(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(l.GetKey(id)))
+		if err != nil {
+			return err
+		}
+		var old Lessee
+		data, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		err = json.Unmarshal(data, &old)
+		if err != nil {
+			return err
+		}
+
+		old.Admins = set.From(old.Admins).Add(add...).Del(del...).ToSlice()
+
+		old.UpdateTime = time.Now()
+
+		data, err = json.Marshal(old)
+		if err != nil {
+			return err
+		}
+		return txn.Set(item.KeyCopy(nil), data)
+	})
+}
+
+func (l Lessee) UpdateTech(id uint64, add, del []uint64) error {
+	return GetDB().Update(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(l.GetKey(id)))
+		if err != nil {
+			return err
+		}
+		var old Lessee
+		data, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		err = json.Unmarshal(data, &old)
+		if err != nil {
+			return err
+		}
+
+		old.Techs = set.From(old.Techs).Add(add...).Del(del...).ToSlice()
 
 		old.UpdateTime = time.Now()
 

@@ -247,3 +247,8 @@ func Range[T any](prefix string, startCursor, endCursor string, limit int, f fun
 		return nil
 	})
 }
+
+func MarshalTime(t time.Time) string {
+	data, _ := json.Marshal(t)
+	return string(data)
+}

@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"mall/storage"
+
 	"github.com/ArtisanCloud/PowerWeChat/v3/src/miniProgram"
 	"github.com/gin-gonic/gin"
 )
@@ -42,72 +44,55 @@ func (h *Handler) Register(e *gin.Engine) {
 
 	e.Use(LesseeMiddle)
 
-	noauth := e.Group("/api/v1/local")
-
-	noauth.PUT("/user/:id", h.PutUser)
-	noauth.GET("/user", h.GetUsers)
-	noauth.POST("/goods", h.PostGoods)
-	noauth.PUT("/goods/:id", h.PutGoods)
-	noauth.GET("/goods", h.GetGoodsList)
-	noauth.GET("/goods/id", h.GetGoods)
-	noauth.GET("/order", h.GetOrders)
-	noauth.PUT("/order/:id", h.PutOrder)
-	noauth.POST("/lessee", h.PostLessee)
-	noauth.PUT("/lessee/:id", h.PutLessee)
-	noauth.GET("/lessee", h.GetLesseeList)
-	noauth.DELETE("/lessee/:id", h.DeleteLessee)
-
 	api := e.Group("/api/v1/mini")
-	admin := e.Group("/api/v1/admin", LocalSessionMiddle, GetSessionMiddle(true, false, h.jwtSecret))
-	manage := e.Group("/api/v1/manage/mini", GetSessionMiddle(true, false, h.jwtSecret))
+
+	api.POST("/image", h.PostImage)
+	api.POST("/image/:id", h.PostImage)
 
 	goods := api.Group("/goods")
-	goods.GET("/", h.GetGoodsList)
-	goods.GET("/id", h.GetGoods)
+	goods.GET("", h.GetGoodsList)
+	goods.GET("/pre", h.PreGetGoodsList)
+	goods.GET("/manage", GetSessionMiddle(h.jwtSecret), h.GetGoodsList)
+	goods.GET("/manage/pre", GetSessionMiddle(h.jwtSecret), h.PreGetGoodsList)
+	goods.GET("/:id", h.GetGoods)
+	goods.HEAD("/:id", h.GetGoods)
+	goods.POST("", GetSessionMiddle(h.jwtSecret), h.PostGoods)
+	goods.PUT("/:id", GetSessionMiddle(h.jwtSecret), h.PutGoods)
+	goods.DELETE("/:id", GetSessionMiddle(h.jwtSecret), h.DeleteGoods)
 
-	order := api.Group("/order", GetSessionMiddle(false, false, h.jwtSecret))
-	order.GET("/", h.GetOrders)
-	order.POST("/", h.PostOrder)
-	order.PUT("/order/:id", h.PutOrder)
+	order := api.Group("/order", GetSessionMiddle(h.jwtSecret))
+	order.GET("", h.GetOrders)
+	order.GET("/pre", h.PreGetOrders)
+	order.GET("/:id", h.GetOrder)
+	order.HEAD("/:id", h.GetOrder)
+	order.POST("", h.PostOrder)
+	order.PUT("/:id", h.PutOrder)
+	order.DELETE("/:id", RoleMiddle(storage.Admin), h.DeleteOrder)
 
-	user := api.Group("/user")
+	user := api.Group("/user", GetSessionMiddle(h.jwtSecret))
 	user.GET("/info", h.PreLogin)
+	user.HEAD("/info", h.PreLogin)
 	user.PUT("/:id", h.PutUser)
 	user.GET("/:id", h.GetUser)
+	user.HEAD("/:id", h.GetUser)
+	user.GET("", RoleMiddle(storage.Admin, storage.Manger), h.GetUsers)
+	user.DELETE("/:id", h.DeleteUser)
 
-	manage.GET("/goods/:id", h.GetGoods)
-	manage.GET("/goods", h.GetGoodsList)
-	manage.POST("/goods", h.PostGoods)
-	manage.PUT("/goods/:id", h.PutGoods)
-	manage.DELETE("/goods/:id", h.DeleteGoods)
-	manage.GET("/order", h.GetOrders)
-	manage.POST("/order", h.PostOrder)
-	manage.PUT("/order/:id", h.PutOrder)
-	manage.GET("/user/:id", h.GetUser)
-	manage.GET("/user", h.GetUsers)
-	manage.PUT("/user/:id", h.PutUser)
+	lessee := api.Group("/lessee", GetSessionMiddle(h.jwtSecret))
+	lessee.POST("", RoleMiddle(storage.Admin), h.PostLessee)
+	lessee.PUT("/:id", RoleMiddle(storage.Admin), h.PutLessee)
+	lessee.PUT("/:id/manager", RoleMiddle(storage.Admin, storage.Manger), h.UpdateLesseeManager)
+	lessee.PUT("/:id/tech", RoleMiddle(storage.Admin, storage.Manger), h.UpdateLesseeTech)
+	lessee.GET("", h.GetLesseeList)
+	lessee.GET("/:id", h.GetLessee)
+	lessee.DELETE("/:id", RoleMiddle(storage.Admin), h.DeleteLessee)
+	lessee.GET("/:id/tech", RoleMiddle(storage.Admin, storage.Manger), h.GetLesseeMembers)
+	lessee.GET("/:id/manager", RoleMiddle(storage.Admin), h.GetLesseeAdmins)
 
-	admin.GET("/user/:id", h.GetUser)
-	admin.GET("/user", h.GetUsers)
-	admin.PUT("/user/:id", h.PutUser)
-	admin.DELETE("/user/:id", h.DeleteUser)
-
-	admin.GET("/goods/:id", h.GetGoods)
-	admin.GET("/goods", h.GetGoodsList)
-	admin.POST("/goods", h.PostGoods)
-	admin.PUT("/goods/:id", h.PutGoods)
-	admin.DELETE("/goods/:id", h.DeleteGoods)
-
-	admin.GET("/order", h.GetOrders)
-	admin.GET("/order/:id", h.GetOrders)
-	admin.POST("/order", h.PostOrder)
-	admin.PUT("/order/:id", h.PutOrder)
-	admin.DELETE("/order/:id", h.DeleteOrder)
-
-	admin.POST("/lessee", h.PostLessee)
-	admin.PUT("/lessee/:id", h.PutLessee)
-	admin.GET("/lessee", h.GetLesseeList)
-	admin.GET("/lessee/:id", h.GetLessee)
-	admin.DELETE("/lessee/:id", h.DeleteLessee)
+	join := api.Group("/join", GetSessionMiddle(h.jwtSecret))
+	join.POST("", h.PostJoin)
+	join.GET("", RoleMiddle(storage.Admin, storage.Manger), h.GetJoins)
+	join.PUT("/:id", RoleMiddle(storage.Admin, storage.Manger), h.PutJoin)
+	join.DELETE("/:id", RoleMiddle(storage.Admin, storage.Manger), h.DeleteJoin)
 
 }

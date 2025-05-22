@@ -1,10 +1,10 @@
 package handler
 
 import (
+	"mall/set"
 	"mall/storage"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,20 +23,8 @@ func LesseeMiddle(c *gin.Context) {
 	}
 }
 
-func LocalSessionMiddle(c *gin.Context) {
-	if strings.Contains(c.RemoteIP(), "127.0.0.1") {
-		c.Set("uid", uint64(1))
-	}
-}
-
-func GetSessionMiddle(admin bool, manage bool, jwtSecret string) func(c *gin.Context) {
+func GetSessionMiddle(jwtSecret string) func(c *gin.Context) {
 	return func(c *gin.Context) {
-		uid := c.GetInt("uid")
-		if uid != 0 && admin {
-			c.Next()
-			return
-		}
-
 		token := c.GetHeader("Authorization")
 		if token == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -45,7 +33,6 @@ func GetSessionMiddle(admin bool, manage bool, jwtSecret string) func(c *gin.Con
 			return
 		}
 
-		// 验证token（这里简化处理）
 		openID := verifyToken(token, jwtSecret)
 		user, err := storage.Model[storage.User]().GetByOpenID(openID)
 		if err != nil || user.ID == 0 {
@@ -53,17 +40,46 @@ func GetSessionMiddle(admin bool, manage bool, jwtSecret string) func(c *gin.Con
 			RespUnauthorized(c)
 			return
 		}
-		if admin && user.Kind != storage.Admin {
-			RespUnauthorized(c)
+
+		c.Set("uid", user.ID)
+		c.Set("role", string(user.Kind))
+		c.Set("user", user)
+	}
+}
+
+func RoleMiddle(roles ...storage.UserKind) func(c *gin.Context) {
+	roleSet := set.From(roles)
+	return func(c *gin.Context) {
+		role := storage.UserKind(c.GetString("role"))
+		if !roleSet.Has(role) {
+			logrus.Infof("role:%s, forbidden", role)
+			RespForbidden(c)
+			c.Abort()
 			return
 		}
-		if manage {
-			if user.Kind != storage.Admin && user.Kind != storage.Manger {
-				RespUnauthorized(c)
+		lessee, err := storage.Model[storage.Lessee]().GetByID(c.GetUint64("lid"))
+		if err != nil {
+			RespForbidden(c)
+			c.Abort()
+			logrus.Infof("lessee:%d not found, forbidden", c.GetUint64("lid"))
+			return
+		}
+		switch role {
+		case storage.Manger:
+			if !set.From(lessee.Admins).Has(c.GetUint64("uid")) {
+				RespForbidden(c)
+				c.Abort()
+				logrus.Infof("user:%d is not manager, forbidden", c.GetUint64("uid"))
+				return
+			}
+		case storage.Technician:
+			if !set.From(lessee.Techs).Has(c.GetUint64("uid")) {
+				RespForbidden(c)
+				c.Abort()
+				logrus.Infof("user:%d is not tech, forbidden", c.GetUint64("uid"))
 				return
 			}
 		}
-		c.Set("uid", user.ID)
 	}
 }
 
@@ -92,7 +108,7 @@ func verifyToken(tokenString, jwtSecret string) string {
 func generateJWTToken(openid, jwtSecret string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"openid": openid,
-		"exp":    time.Now().Add(time.Hour * 24 * 7).Unix(), // 7天过期
+		"exp":    time.Now().AddDate(2000, 0, 0).Unix(), // 不过期
 		"iat":    time.Now().Unix(),
 	})
 
